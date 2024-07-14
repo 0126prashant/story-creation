@@ -1,0 +1,137 @@
+const express = require('express');
+const axios = require('axios');
+const { OpenAI } = require('@langchain/openai');
+const fs = require('fs');
+const path = require('path');
+const dotenv = require('dotenv');
+const { Leonardo } = require('@leonardo-ai/sdk');
+
+dotenv.config();
+
+const routergpt = express.Router();
+
+const openaiApiKey = process.env.OPENAI_API_KEY;
+const leonardoApiKey = process.env.LEONARDO_API_KEY;
+
+const model = new OpenAI({
+  apiKey: openaiApiKey,
+  model: 'gpt-4o',
+});
+
+const uploadsDir = path.join(__dirname, '../uploads');
+if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir);
+}
+
+const leonardo = new Leonardo({
+  bearerAuth: leonardoApiKey,
+});
+
+async function generateImage(prompt) {
+  console.log("image",prompt)
+  try {
+    const result = await leonardo.generation.createGeneration({
+      "prompt": prompt,
+      "modelId": "6bef9f1b-29cb-40c7-b9df-32b51c1f67d3",
+      "width": 512,
+      "height": 512,
+      "numImages": 1
+    });
+    return result;
+  } catch (error) {
+    console.error("Error in image generation:", error);
+    throw error;
+  }
+}
+
+async function checkGenerationStatus(generationId) {
+  try {
+    const response = await axios.get(`https://cloud.leonardo.ai/api/rest/v1/generations/${generationId}`, {
+      headers: {
+        'Authorization': `Bearer ${leonardoApiKey}`
+      }
+    });
+    return response.data.generations_by_pk;
+  } catch (error) {
+    console.error('Error checking generation status:', error.response ? error.response.data : error.message);
+    throw error;
+  }
+}
+
+async function fetchAndSaveImage(imageUrl) {
+  try {
+    const imageResponse = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+    const buffer = Buffer.from(imageResponse.data, 'binary');
+
+    const filename = `generated_image_${Date.now()}.jpg`;
+    const filePath = path.join(uploadsDir, filename);
+    fs.writeFileSync(filePath, buffer);
+
+    return filePath;
+  } catch (error) {
+    console.error('Error fetching and saving image:', error.response ? error.response.data : error.message);
+    throw error;
+  }
+}
+
+routergpt.post('/generate', async (req, res) => {
+    try {
+      const { prompt } = req.body;
+      console.log(prompt)
+      if (!prompt) {
+        return res.status(400).send({ error: 'Prompt is required' });
+      }
+
+      // Generate GPT response
+      const gptResponse = await model.invoke(prompt);
+      console.log("gptResponse",gptResponse)
+
+      // Generate Image with Leonardo
+      const imageResult = await generateImage(gptResponse);
+      const generationId = imageResult.object.sdGenerationJob.generationId;
+
+      let generationStatus;
+      do {
+        await new Promise(resolve => setTimeout(resolve, 5000)); // Wait for 5 seconds before polling again
+        generationStatus = await checkGenerationStatus(generationId);
+      } while (generationStatus.status !== 'COMPLETE');
+
+      if (generationStatus.generated_images.length === 0) {
+        throw new Error('No generated images found');
+      }
+
+      const imageUrl = generationStatus.generated_images[0].url;
+      const filePath = await fetchAndSaveImage(imageUrl);
+
+      res.send({ 
+        gptResponse: gptResponse.response,
+        imageUrl: filePath 
+      });
+    } catch (error) {
+      console.error('Error generating response:', error);
+      res.status(500).send({ error: 'Failed to generate response' });
+    }
+  });
+
+module.exports = { routergpt };
+
+
+
+You are a master storyteller specializing in creating interactive, Twilight Zone-style narratives. Your task is to generate a detailed, atmospheric story scenario based on a given theme. The story should be eerie, thought-provoking, and contain unexpected twists or moral dilemmas.
+
+Input: [User's theme]
+
+Output your response in the following JSON format:
+{
+  "narration": "Two paragraphs of narration. The first paragraph should set the scene and introduce the main character or situation, written in a style reminiscent of Rod Serling's Twilight Zone introductions. The second paragraph should present the user with a situation that requires a decision, subtly suggesting possible paths without explicitly listing options.",
+  "image_prompt": "A detailed text prompt for generating an image that captures the essence of the current scene. Include important visual elements, mood, and style."
+}
+
+After the user makes a decision by entering text, generate the next part of the story following the same format. Each choice should lead to a unique narrative branch, eventually culminating in a twist ending or moral revelation.
+
+Key points to remember:
+1. Maintain a consistent tone and atmosphere throughout the story, emphasizing the uncanny, mysterious, or morally ambiguous elements that make Twilight Zone narratives compelling.
+2. Present choices organically within the narration, allowing the user to make decisions based on the situation described.
+3. Be prepared to interpret a wide range of user inputs and continue the story accordingly.
+4. Ensure that each decision point leads to meaningfully different outcomes.
+5. Gradually build tension and intrigue, leading to a powerful twist or revelation at the story's conclusion.
