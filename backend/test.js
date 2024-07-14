@@ -1,34 +1,22 @@
-const express = require('express');
+const { Leonardo } = require("@leonardo-ai/sdk");
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const dotenv = require('dotenv');
-const { Leonardo } = require('@leonardo-ai/sdk');
-
-dotenv.config();
-
-const routerLeonardo = express.Router();
-const apiKey = process.env.LEONARDO_API_KEY;
-
-const uploadsDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir);
-}
 
 const leonardo = new Leonardo({
-  bearerAuth: apiKey,
+  bearerAuth: "60aa3f8c-3519-44d1-9d02-2b7d2884c4ea",
 });
 
-async function generateImage(prompt) {
+async function generateImage() {
   try {
     const result = await leonardo.generation.createGeneration({
-      "prompt": prompt,
-      "modelId": "6bef9f1b-29cb-40c7-b9df-32b51c1f67d3",
-      "width": 1024,
-      "height": 576,
-      "numImages": 1
+      prompt: "Doodle robot line art",
+      modelId: "6bef9f1b-29cb-40c7-b9df-32b51c1f67d3",
+      width: 512,
+      height: 512,
+      numImages: 1,
     });
-    // console.log("Generation result:", result);
+    console.log("Generation result:", result);
     return result;
   } catch (error) {
     console.error("Error in image generation:", error);
@@ -40,10 +28,10 @@ async function checkGenerationStatus(generationId) {
   try {
     const response = await axios.get(`https://cloud.leonardo.ai/api/rest/v1/generations/${generationId}`, {
       headers: {
-        'Authorization': `Bearer ${apiKey}`
+        'Authorization': `Bearer 60aa3f8c-3519-44d1-9d02-2b7d2884c4ea`
       }
     });
-    // console.log('Generation status response:', response.data);
+    console.log('Generation status response:', response.data);
     return response.data.generations_by_pk;
   } catch (error) {
     console.error('Error checking generation status:', error.response ? error.response.data : error.message);
@@ -57,26 +45,18 @@ async function fetchAndSaveImage(imageUrl) {
     const buffer = Buffer.from(imageResponse.data, 'binary');
 
     const filename = `generated_image_${Date.now()}.jpg`;
-    const filePath = path.join(uploadsDir, filename);
+    const filePath = path.join(__dirname, 'uploads', filename);
     fs.writeFileSync(filePath, buffer);
 
-    // console.log(`Image saved at: ${filePath}`);
-    return filePath;
+    console.log(`Image saved at: ${filePath}`);
   } catch (error) {
     console.error('Error fetching and saving image:', error.response ? error.response.data : error.message);
-    throw error;
   }
 }
 
-routerLeonardo.post('/generate-image', async (req, res) => {
-  const { prompt } = req.body;
-
-  if (!prompt) {
-    return res.status(400).json({ error: 'Missing required fields: prompt, modelId, width, height, or numImages' });
-  }
-
+async function main() {
   try {
-    const result = await generateImage(prompt);
+    const result = await generateImage();
     const generationId = result.object.sdGenerationJob.generationId;
 
     let generationStatus;
@@ -90,16 +70,10 @@ routerLeonardo.post('/generate-image', async (req, res) => {
     }
 
     const imageUrl = generationStatus.generated_images[0].url;
-    const filePath = await fetchAndSaveImage(imageUrl);
-
-    res.json({
-      message: 'Image generated and saved successfully',
-      imageUrl: filePath,
-    });
+    await fetchAndSaveImage(imageUrl);
   } catch (error) {
     console.error("Image generation and saving failed:", error);
-    res.status(500).json({ error: error.message });
   }
-});
+}
 
-module.exports = { routerLeonardo };
+main();

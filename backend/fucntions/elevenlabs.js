@@ -30,7 +30,7 @@ const createAudioFileFromText = async (text) => {
       fileStream.on("finish", async () => {
         try {
           const data = await readFileAsync(fileName, { encoding: 'base64' });
-          fs.unlinkSync(fileName); // Remove the file after reading
+          fs.unlinkSync(fileName); 
           resolve(data);
         } catch (error) {
           reject(error);
